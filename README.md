@@ -1,25 +1,34 @@
 # nccl-rccl-parser
-This tool is used for dumping out the rccl-tests/nccl-test commands directly from an application to identify any potential bottlenecks of scaling while using RCCL/NCCL modules when running a distributed applications.
+This tool parses RCCL/NCCL debug logs from distributed applications and generates corresponding rccl-tests/nccl-tests commands. It helps identify potential communication bottlenecks when scaling distributed applications using RCCL/NCCL.
 
-To get started please clone the following repository: 
+## Features
+- Automatic platform detection (ROCm/CUDA)
+- Parses NCCL/RCCL debug logs and extracts collective operations
+- Generates executable test scripts for performance benchmarking
+- Supports unique command extraction with occurrence counts
+- Generates CSV summary reports with performance metrics
+
+## Getting Started
+
+Clone the repository with submodules:
 ```
-git clone --recursive https://github.com/ROCmSoftwarePlatform/nccl-rccl-parser
+git clone --recursive https://github.com/ROCm/nccl-rccl-parser
 ```
-To run the tests, we use the following repositories:
 
-* On ROCm: https://github.com/ROCmSoftwarePlatform/rccl-tests
-* On CUDA: https://github.com/NVIDIA/nccl-tests.git
+The following test repositories are included as submodules:
+* ROCm: [rccl-tests](https://github.com/ROCmSoftwarePlatform/rccl-tests)
+* CUDA: [nccl-tests](https://github.com/NVIDIA/nccl-tests)
 
-# Pre-requisites:
-* RCCL/NCCL installed. 
-* rccl-tests or nccl-tests installed.
+## Pre-requisites
+* Python 3.x
+* RCCL (ROCm) or NCCL (CUDA) installed
+* rccl-tests or nccl-tests (included as submodules)
 
-# How to use the tool:
+## Usage
 
-### Run application and collect RCCL/NCCL Log:**
+### Step 1: Collect RCCL/NCCL Debug Log
 
-Firstly, make sure you are running the experiments of a distributed setup of an application.
-Make sure to run the application for at least 1 iteration using the below two environment variables into a log file named nccl_debug_log.txt
+Run your distributed application with NCCL debug logging enabled. The application needs to run for at least 1 iteration to capture the collective operations.
 
 **On CUDA:**
 ```
@@ -30,84 +39,119 @@ NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,COLL <application/executable> |& tee nccl
 HSA_FORCE_FINE_GRAIN_PCIE=1 NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,COLL <application/executable> |& tee nccl_debug_log.txt
 ```
 **NOTE:**
-For some workloads buffered output can impact the RCCL/NCCL log format which may break the parser. The following env variable can help with this 
+For some workloads buffered output can impact the RCCL/NCCL log format which may break the parser. The following env variables can help with this:
 ```
 PYTHONBUFFERED=x stdbuf -i0 -o0 -e0
 ```
 
 
-### Automated way:
+### Step 2: Parse and Run Tests
 
-To gather the performance results once you have the debug log with you. Run the below command. 
+#### Option A: Automated Script (Recommended)
 
-On CUDA devices, use --cuda argument.
-
-On ROCm devices, use --rocm argument.
-
-Note: If you don't mention the arguments the automated script only dumps out the output data from the parser. 
+The automated script parses the log, runs the tests, and generates a summary report:
 
 **On ROCm:**
-
-```
+```bash
 python run_parser_and_generate_summary.py --nccl-debug-log nccl_debug_log.txt --rocm
 ```
 
 **On CUDA:**
-
-```
+```bash
 python run_parser_and_generate_summary.py --nccl-debug-log nccl_debug_log.txt --cuda
 ```
 
-### Easy mode: one bash script:
-Ensure a RUN_COMMAND has been set, this can be any executable or bash script.
+#### Option B: One-Command Mode
 
-**Usage on ROCm:**
-bash automated_parser.sh --run-command "{RUN_COMMAND}" --use-rocm
+Run collection, parsing, and benchmarking in a single command using `run_and_benchmark.sh`:
 
-**Usage on CUDA:**
-bash automated_parser.sh --run-command "{RUN_COMMAND}" 
-
-This will collect the logs from your program automatically and dump out the final csv report.
-
-### To run the tool manually step by step:
-
-**Use Parser to dump out the test commands:**
-
-Once the log is being collected, use the parser to dump out all the rccl/nccl test commands or just the unique commands with their respective counts of the workload.
-Note: To dump out the unique commands use the --unique argument. 
-Optional parameters: output-script-name, unique
-
-Here is the usage of the script
-
+**On ROCm:**
+```bash
+bash run_and_benchmark.sh --run-command "<your_application>" --use-rocm
 ```
+
+**On CUDA:**
+```bash
+bash run_and_benchmark.sh --run-command "<your_application>"
+```
+
+This captures the logs, parses them, runs the tests, and generates the final CSV report.
+
+#### Option C: Manual Step-by-Step
+
+**1. Parse the debug log:**
+
+```bash
+# Generate all commands in execution order
 python rccl_nccl_parser.py --nccl-debug-log nccl_debug_log.txt --output-script-name net
-(or)
+
+# Or generate unique commands with counts
 python rccl_nccl_parser.py --nccl-debug-log nccl_debug_log.txt --output-script-name net --unique
 ```
 
-The first command dumps out all the rccl/nccl tests in the order they get executed in the application. (net_rccl_nccl.sh file).
-The second command dumps out a script file with unique commands and a csv file with commands and its counts of each command. 
-
-**Run rccl-tests/nccl-tests:**
-
-Once you dump out the scripts, make sure to copy the script in nccl-tests/rccl-tests folder and run the script and gather the 
-Inside nccl-tests/rccl-tests repository:
-
-```sh net_unique.sh |& tee rccl_perf_data.txt```
-
-Once you run the above script, the performance data of each command is redirected to a text file. 
-
-**Generate Summary:**
-
-Now the final step is to use the above performance log and generate a summary in the form of CSV file for each of the command. The command gives the average values for each command like Time(us), algBw, busBw (out-of-place and in-place). For pytorch please consider out of place options. 
-
-To generate the summary, navigate to the tool nccl-rccl-parser:
-
+The parser auto-detects the platform (ROCm/CUDA). To specify explicitly:
+```bash
+python rccl_nccl_parser.py --nccl-debug-log nccl_debug_log.txt --output-script-name net --platform rocm
+python rccl_nccl_parser.py --nccl-debug-log nccl_debug_log.txt --output-script-name net --platform cuda
 ```
-python generate_summary.py --log-file rccl_perf_data.txt --output-file-name test_app_data--script-file net_unique.sh 
+
+**2. Run the generated test script:**
+
+Copy the script to the tests directory and execute:
+```bash
+cd rccl-tests  # or nccl-tests
+sh net_unique.sh |& tee rccl_perf_data.txt
 ```
-This dumps out a csv file with performance data for further analysis. 
 
-**Supported Collectives:**
+**3. Generate the summary report:**
 
-Currently only the AllReduce and Broadcast calls are being supported by this tool. Based on running more experiments other collectives need to be added. 
+```bash
+python generate_summary.py --log-file rccl_perf_data.txt --output-file-name test_app_data --script-file net_unique.sh --count-file net_counts.csv
+```
+
+This generates a CSV file with performance metrics including Time(us), algBw, and busBw for both out-of-place and in-place operations.
+
+## Supported Collectives
+
+The parser supports the following collective operations:
+
+| Collective | Test Command |
+|------------|--------------|
+| AllReduce | `all_reduce_perf` |
+| AllGather | `all_gather_perf` |
+| Broadcast | `broadcast_perf` |
+| Reduce | `reduce_perf` |
+| ReduceScatter | `reduce_scatter_perf` |
+| Gather | `gather_perf` |
+| Scatter | `scatter_perf` |
+| AllToAll | `alltoall_perf` |
+| AllToAllv | `alltoallv_perf` |
+| Send/Recv | `sendrecv_perf` |
+| Hypercube | `hypercube_perf` |
+
+## Supported Data Types
+
+| Type | Description |
+|------|-------------|
+| int8, uint8 | 8-bit integers |
+| int32, uint32 | 32-bit integers |
+| int64, uint64 | 64-bit integers |
+| half | 16-bit floating point |
+| float | 32-bit floating point |
+| double | 64-bit floating point |
+| bfloat16 | Brain floating point |
+| fp8_e4m3 / f8e4m3 | FP8 (ROCm/CUDA) |
+| fp8_e5m2 / f8e5m2 | FP8 (ROCm/CUDA) |
+
+## Supported Reduction Operations
+
+- sum
+- prod
+- max
+- min
+- avg
+- mulsum
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
