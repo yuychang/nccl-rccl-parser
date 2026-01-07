@@ -2,6 +2,49 @@ import os
 import sys
 import argparse
 
+def detect_platform():
+    """Detect whether running on ROCm or CUDA platform."""
+    # Check for ROCm
+    rocm_paths = ["/opt/rocm", os.environ.get("ROCM_PATH", "")]
+    for path in rocm_paths:
+        if path and os.path.exists(path):
+            return "rocm"
+
+    # Check for CUDA
+    cuda_paths = ["/usr/local/cuda", os.environ.get("CUDA_HOME", ""), os.environ.get("CUDA_PATH", "")]
+    for path in cuda_paths:
+        if path and os.path.exists(path):
+            return "cuda"
+
+    raise RuntimeError(
+        "Could not detect platform. Neither ROCm nor CUDA found. "
+        "Please specify --platform explicitly or set ROCM_PATH/CUDA_HOME environment variable."
+    )
+
+def get_data_types_map(platform):
+    """Get data types map with platform-specific FP8 naming."""
+    base_types = {
+        "0" : "int8",
+        "1" : "uint8",
+        "2" : "int32",
+        "3" : "uint32",
+        "4" : "int64",
+        "5" : "uint64",
+        "6" : "half",
+        "7" : "float",
+        "8" : "double",
+        "9" : "bfloat16",
+    }
+
+    if platform == "cuda":
+        base_types["10"] = "f8e4m3"
+        base_types["11"] = "f8e5m2"
+    else:  # rocm
+        base_types["10"] = "fp8_e4m3"
+        base_types["11"] = "fp8_e5m2"
+
+    return base_types
+
 coll_op_map = {
             "Broadcast": "broadcast_perf",
             "Reduce": "reduce_perf",
@@ -14,6 +57,8 @@ coll_op_map = {
             "AllToAllv": "alltoallv_perf",
             "Send": "sendrecv_perf",
             "Recv": "sendrecv_perf",
+            "Hypercube": "hypercube_perf",
+            "AllReduceBias": "all_reduce_bias_perf",
           }
 
 reduction_op_map = {
@@ -21,22 +66,11 @@ reduction_op_map = {
                 "1" : "prod",
                 "2" : "max",
                 "3" : "min",
-                "4" : "all",
+                "4" : "avg",
+                "5" : "mulsum",
                }
 
-data_types_map = {
-                "0" : "int8",
-                "1" : "uint8",
-                "2" : "int32",
-                "3" : "uint32",
-                "4" : "int64",
-                "5" : "uint64",
-                "6" : "half",
-                "7" : "float",
-                "8" : "double",
-                "9" : "bfloat16",
-                #"10" : "ncclNumTypes Equivalent?"
-             }
+# Platform-specific data types map is initialized in main()
 
 data_type_bytes_map = {
                     "0" : 1,
@@ -49,7 +83,8 @@ data_type_bytes_map = {
                     "7" : 4,
                     "8" : 8,
                     "9" : 2,
-                    #"10" : Not sure.
+                    "10" : 1,
+                    "11" : 1,
                   }
                 
 def get_useful_info(log_file):
@@ -65,8 +100,8 @@ def get_useful_info(log_file):
 
     return useful_lines
 
-def parse_nccl_log(nccl_lines):
-    
+def parse_nccl_log(nccl_lines, data_types_map):
+
     commands = []
     for j in range(len(nccl_lines)):
         line = nccl_lines[j]
@@ -78,19 +113,11 @@ def parse_nccl_log(nccl_lines):
         root = split_list[split_list.index("root") + 1]
         nnranks = next(item for item in split_list if 'nranks' in item).split("=")[1].replace("]", "")
 
-        #print (comm)
-        #print (count)
-        #print (datatype)
-        #print (op_type)
-        #print (root)
-        #print (nnranks)
-
         total_bytes = int(count) * data_type_bytes_map[datatype]
 
         test_cmd = "./build/" + coll_op_map[comm.replace("mscclFunc", "")] + " -d " + data_types_map[datatype] + \
                        " -b " + str(total_bytes) + " -e " + str(total_bytes) + \
                        " -o " + reduction_op_map[op_type] + " -g " + str(nnranks)
-        #print (test_cmd)
         commands.append((test_cmd, int(nnranks)))
 
     return commands
@@ -137,9 +164,22 @@ def get_unique_commands(commands_and_nranks):
 
 def main():
     log_file = os.path.abspath(args.nccl_debug_log)
+
+    # Detect or use specified platform
+    if args.platform:
+        platform = args.platform
+    else:
+        platform = detect_platform()
+    print("INFO: Using platform: {} (FP8 types: {})".format(
+        platform,
+        "f8e4m3/f8e5m2" if platform == "cuda" else "fp8_e4m3/fp8_e5m2"
+    ))
+
+    data_types_map = get_data_types_map(platform)
+
     nccl_lines = get_useful_info(log_file)
-    commands_and_nranks = parse_nccl_log(nccl_lines)
-    #generate_script(commands, args.output_script_name)
+    commands_and_nranks = parse_nccl_log(nccl_lines, data_types_map)
+
     if (args.unique):
         new_commands, counts_map = get_unique_commands(commands_and_nranks)
         generate_script(new_commands, args.output_script_name + "_unique")
@@ -153,6 +193,7 @@ if __name__ == '__main__':
     parser.add_argument("--nccl-debug-log", type=str, required=True, help="Log from app with NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,COLL")
     parser.add_argument("--output-script-name", type=str, required=False, default="net_nccl_rccl", help="Output command script")
     parser.add_argument("--unique", action="store_true", default=False, help="Get only the unique commands.")
+    parser.add_argument("--platform", type=str, required=False, choices=["cuda", "rocm"], help="Platform to use (auto-detected if not specified)")
 
     args = parser.parse_args()
     main()

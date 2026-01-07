@@ -7,7 +7,14 @@ def main():
 
     ##### Firstly call rccl_nccl_parser.py to parse the ......log.txt file
     ## Generate a script to run nccl/rccl tests.
-    gen_cmd = "python rccl_nccl_parser.py --nccl-debug-log " + debug_log + " --output-script-name net --unique"
+    ## Determine platform for correct FP8 type naming
+    platform_arg = ""
+    if args.rocm:
+        platform_arg = " --platform rocm"
+    elif args.cuda:
+        platform_arg = " --platform cuda"
+
+    gen_cmd = "python rccl_nccl_parser.py --nccl-debug-log " + debug_log + " --output-script-name net --unique" + platform_arg
     if os.system(gen_cmd):
         print ("ERROR: Failed to parse the log.")
         sys.exit(1)
