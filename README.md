@@ -47,18 +47,17 @@ PYTHONBUFFERED=x stdbuf -i0 -o0 -e0
 
 ### Step 2: Parse and Run Tests
 
-#### Option A: Automated Script (Recommended)
+#### Option A: Replay and Benchmark (Recommended)
 
-The automated script parses the log, runs the tests, and generates a summary report:
+Parses the log, replays the collective operations, and generates a summary report:
 
-**On ROCm:**
 ```bash
-python run_parser_and_generate_summary.py --nccl-debug-log nccl_debug_log.txt --rocm
-```
+# Platform is auto-detected, or specify explicitly with --platform
+python replay_and_benchmark.py --nccl-debug-log nccl_debug_log.txt
 
-**On CUDA:**
-```bash
-python run_parser_and_generate_summary.py --nccl-debug-log nccl_debug_log.txt --cuda
+# Explicit platform selection
+python replay_and_benchmark.py --nccl-debug-log nccl_debug_log.txt --platform rocm
+python replay_and_benchmark.py --nccl-debug-log nccl_debug_log.txt --platform cuda
 ```
 
 #### Option B: One-Command Mode
