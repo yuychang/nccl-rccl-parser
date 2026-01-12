@@ -100,9 +100,17 @@ def get_useful_info(log_file):
 
     return useful_lines
 
-def parse_nccl_log(nccl_lines, data_types_map):
+def get_test_cmd_prefix(platform):
+    """Get the test command prefix based on platform."""
+    if platform == "cuda":
+        return "./nccl-tests/build/"
+    else:  # rocm
+        return "./rccl-tests/build/"
+
+def parse_nccl_log(nccl_lines, data_types_map, platform):
 
     commands = []
+    test_cmd_prefix = get_test_cmd_prefix(platform)
     for j in range(len(nccl_lines)):
         line = nccl_lines[j]
         split_list = line.split(" ")
@@ -115,7 +123,7 @@ def parse_nccl_log(nccl_lines, data_types_map):
 
         total_bytes = int(count) * data_type_bytes_map[datatype]
 
-        test_cmd = "./build/" + coll_op_map[comm.replace("mscclFunc", "")] + " -d " + data_types_map[datatype] + \
+        test_cmd = test_cmd_prefix + coll_op_map[comm.replace("mscclFunc", "")] + " -d " + data_types_map[datatype] + \
                        " -b " + str(total_bytes) + " -e " + str(total_bytes) + \
                        " -o " + reduction_op_map[op_type] + " -g " + str(nnranks)
         commands.append((test_cmd, int(nnranks)))
@@ -178,7 +186,7 @@ def main():
     data_types_map = get_data_types_map(platform)
 
     nccl_lines = get_useful_info(log_file)
-    commands_and_nranks = parse_nccl_log(nccl_lines, data_types_map)
+    commands_and_nranks = parse_nccl_log(nccl_lines, data_types_map, platform)
 
     if (args.unique):
         new_commands, counts_map = get_unique_commands(commands_and_nranks)
