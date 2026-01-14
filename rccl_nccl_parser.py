@@ -107,7 +107,7 @@ def get_test_cmd_prefix(platform):
     else:  # rocm
         return "./rccl-tests/build/"
 
-def parse_nccl_log(nccl_lines, data_types_map, platform):
+def parse_nccl_log(nccl_lines, data_types_map, platform, pytorch_mode=False):
 
     commands = []
     test_cmd_prefix = get_test_cmd_prefix(platform)
@@ -123,9 +123,16 @@ def parse_nccl_log(nccl_lines, data_types_map, platform):
 
         total_bytes = int(count) * data_type_bytes_map[datatype]
 
-        test_cmd = test_cmd_prefix + coll_op_map[comm.replace("mscclFunc", "")] + " -d " + data_types_map[datatype] + \
-                       " -b " + str(total_bytes) + " -e " + str(total_bytes) + \
-                       " -o " + reduction_op_map[op_type] + " -g " + str(nnranks)
+        if pytorch_mode:
+            # PyTorch mode (DDP/FSDP/FSDP2): N processes, each with 1 GPU (mpirun -np N ... -g 1)
+            test_cmd = "mpirun -np " + str(nnranks) + " " + test_cmd_prefix + coll_op_map[comm.replace("mscclFunc", "")] + " -d " + data_types_map[datatype] + \
+                           " -b " + str(total_bytes) + " -e " + str(total_bytes) + \
+                           " -o " + reduction_op_map[op_type] + " -g 1"
+        else:
+            # Original mode: 1 process with multiple GPUs (-g nranks)
+            test_cmd = test_cmd_prefix + coll_op_map[comm.replace("mscclFunc", "")] + " -d " + data_types_map[datatype] + \
+                           " -b " + str(total_bytes) + " -e " + str(total_bytes) + \
+                           " -o " + reduction_op_map[op_type] + " -g " + str(nnranks)
         commands.append((test_cmd, int(nnranks)))
 
     return commands
@@ -186,7 +193,10 @@ def main():
     data_types_map = get_data_types_map(platform)
 
     nccl_lines = get_useful_info(log_file)
-    commands_and_nranks = parse_nccl_log(nccl_lines, data_types_map, platform)
+    commands_and_nranks = parse_nccl_log(nccl_lines, data_types_map, platform, pytorch_mode=args.pytorch)
+
+    if args.pytorch:
+        print("INFO: Generating PyTorch-aligned commands for DDP/FSDP/FSDP2 (mpirun -np N ... -g 1)")
 
     if (args.unique):
         new_commands, counts_map = get_unique_commands(commands_and_nranks)
@@ -202,6 +212,7 @@ if __name__ == '__main__':
     parser.add_argument("--output-script-name", type=str, required=False, default="net_nccl_rccl", help="Output command script")
     parser.add_argument("--unique", action="store_true", default=False, help="Get only the unique commands.")
     parser.add_argument("--platform", type=str, required=False, choices=["cuda", "rocm"], help="Platform to use (auto-detected if not specified)")
+    parser.add_argument("--pytorch", action="store_true", default=False, help="Generate PyTorch-aligned commands for DDP/FSDP/FSDP2 (N processes, 1 GPU each via mpirun)")
 
     args = parser.parse_args()
     main()
